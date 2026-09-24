@@ -1,346 +1,227 @@
-# Automotive CAN Network System: 2-Node Telematics Gateway & Powertrain ECU Simulator
+# Automotive CAN Telematics Gateway & Diagnostic Node
 
-[![Zephyr Version](https://img.shields.io/badge/Zephyr--RTOS-v3.7.0-blue.svg)](https://zephyrproject.org/)
-[![Hardware F7](https://img.shields.io/badge/Node%201-STM32F746G--DISCO-red.svg)](https://www.st.com/en/evaluation-tools/32f746gdiscovery.html)
-[![Hardware F1](https://img.shields.io/badge/Node%202-STM32F103C8T6-blueviolet.svg)](#-node-2-powertrain-ecu-simulator)
-[![Bus Protocol](https://img.shields.io/badge/Bus-CAN%202.0B%20(500kbps)-green.svg)](#-can-network--dbc-specification)
-[![Safety Standard](https://img.shields.io/badge/Standard-AUTOSAR%20E2E%20Profile%201-orange.svg)](#-safety-architecture--autosar-e2e)
+[![Node 1](https://img.shields.io/badge/Node%201-STM32F746NG%20(Cortex--M7%20%40%20216MHz)-red.svg)](#node-1--stm32f746ng-telematics-gateway)
+[![Node 2](https://img.shields.io/badge/Node%202-STM32F103C8T6%20(Cortex--M3%20%40%2072MHz)-orange.svg)](#node-2--stm32f103c8t6-ecu-simulator)
+[![RTOS](https://img.shields.io/badge/Node%201%20Firmware-Zephyr%20RTOS-blue.svg)](#node-1--stm32f746ng-telematics-gateway)
+[![Firmware](https://img.shields.io/badge/Node%202%20Firmware-100%25%20Bare--Metal-blue.svg)](#node-2--stm32f103c8t6-ecu-simulator)
+[![Protocol](https://img.shields.io/badge/Protocol-CAN%202.0B%20%2B%20AUTOSAR%20E2E%20Profile%201-green.svg)](#-định-dạng-bản-tin-can--vector-dbc)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 
-An end-to-end, dual-node automotive Controller Area Network (CAN) system demonstrating real-time vehicle telemetry transmission, validation, and diagnosis across two heterogeneous ARM architectures:
-
-1. **Node 1 (Telematics Gateway & Diagnostic Cluster):** Running on **STM32F746G-DISCO** (ARM Cortex-M7 @ 216 MHz) powered by **Zephyr RTOS v3.7.0**. Features asynchronous hardware-filtered CAN frame ingestion (`k_msgq`), fixed-point **Vector DBC signal decoding**, **AUTOSAR E2E Profile 1** integrity checking, automated **ISO 11898-1 Bus-Off recovery**, and an interactive **Zephyr Shell CLI** for real-time telemetry inspection and DTC diagnosis.
-2. **Node 2 (Powertrain Engine Control Unit - ECU Simulator):** Running on **STM32F103C8T6 Blue Pill** (ARM Cortex-M3 @ 72 MHz) implemented via a high-performance **100% Bare-Metal Register Driver**. Emulates an engine control module (ECM) periodically broadcasting live driving dynamics (Speed, RPM, Coolant Temp) with rolling counter and CRC-8 protection at 100 ms (10 Hz).
+Một hệ thống **2 vi điều khiển giao tiếp qua CAN Bus vật lý**, mô phỏng lại đúng kiến trúc mạng CAN ô tô thật: một node đóng vai ECU động cơ/hộp số/phanh liên tục phát dữ liệu cảm biến (**Node 2 — STM32F103, bare-metal**), một node đóng vai Gateway/Cụm đồng hồ nhận, giải mã, xác thực an toàn dữ liệu theo chuẩn **AUTOSAR E2E Profile 1** và cung cấp giao diện chẩn đoán qua CLI (**Node 1 — STM32F746, Zephyr RTOS**).
 
 ---
 
-## 📑 Table of Contents
+## 📑 Mục Lục
 
-- [System Architecture & 2-Node Block Diagram](#-system-architecture--2-node-block-diagram)
-- [Hardware Wiring & Pinout Guide](#-hardware-wiring--pinout-guide)
-- [CAN Network & DBC Specification](#-can-network--dbc-specification)
-- [Live Diagnostic Terminal Showcase](#-live-diagnostic-terminal-showcase)
-- [Performance & Reliability Benchmarks](#-performance--reliability-benchmarks)
-- [System Behavior & Multithreaded Workflow](#-system-behavior--multithreaded-workflow)
-- [Safety Architecture & AUTOSAR E2E](#-safety-architecture--autosar-e2e)
-- [1-Click Build & Quick Start Guide](#-1-click-build--quick-start-guide)
-- [Project Directory Structure](#-project-directory-structure)
-- [Author Information](#-author-information)
-
----
-
-## 🏗️ System Architecture & 2-Node Block Diagram
-
-```text
- ┌───────────────────────────────────────────┐                ┌───────────────────────────────────────────┐
- │    NODE 1: TELEMATICS GATEWAY CLUSTER     │                │     NODE 2: POWERTRAIN ECU SIMULATOR      │
- │  - Board: STM32F746G-DISCO                │                │  - Board: STM32F103C8T6 (Blue Pill)       │
- │  - Core: ARM Cortex-M7 @ 216 MHz          │                │  - Core: ARM Cortex-M3 @ 72 MHz           │
- │  - OS: Zephyr RTOS (Multi-threaded)       │                │  - Driver: Bare-metal Register (bxCAN)    │
- │  - Tasks: CAN Worker, Supervisor, Shell   │                │  - Period: 100 ms (10 Hz Periodic Transmit)│
- └─────────────────────┬─────────────────────┘                └─────────────────────┬─────────────────────┘
-                       │ (PB8: RX, PB9: TX)                                         │ (PA11: RX, PA12: TX)
-                       ▼                                                            ▼
-            ┌─────────────────────┐                                      ┌─────────────────────┐
-            │   CAN Transceiver   │                                      │   CAN Transceiver   │
-            │ SN65HVD230/TJA1050  │                                      │ SN65HVD230/TJA1050  │
-            └──────────┬──────────┘                                      └──────────┬──────────┘
-                       │ CAN_H ────────────────────────────────────────────── CAN_H │
-                       │ CAN_L ────────────────────────────────────────────── CAN_L │
-                       │ GND   ────────────────────────────────────────────── GND   │ (Common Ground)
-                       └─────────── [Bus CAN 500 kbps, 2x 120Ω Term Resistors] ─────┘
-```
+- [Kiến Trúc Tổng Quan](#-kiến-trúc-tổng-quan)
+- [Tính Năng Chính](#-tính-năng-chính)
+- [Định Dạng Bản Tin CAN (Vector DBC)](#-định-dạng-bản-tin-can--vector-dbc)
+- [Luồng Dữ Liệu End-to-End](#-luồng-dữ-liệu-end-to-end)
+- [Yêu Cầu Phần Cứng](#️-yêu-cầu-phần-cứng)
+- [Sơ Đồ Đấu Dây](#-sơ-đồ-đấu-dây)
+- [Bắt Đầu Nhanh](#-bắt-đầu-nhanh)
+  - [Node 1 — STM32F746NG Telematics Gateway](#node-1--stm32f746ng-telematics-gateway)
+  - [Node 2 — STM32F103C8T6 ECU Simulator](#node-2--stm32f103c8t6-ecu-simulator)
+- [Bộ Lệnh Chẩn Đoán (Zephyr Shell CLI)](#-bộ-lệnh-chẩn-đoán-zephyr-shell-cli)
+- [Cấu Trúc Thư Mục](#️-cấu-trúc-thư-mục)
+- [Giới Hạn Hiện Tại & Hướng Phát Triển](#️-giới-hạn-hiện-tại--hướng-phát-triển)
+- [Thông Tin Tác Giả](#-thông-tin-tác-giả)
 
 ---
 
-## 🔌 Hardware Wiring & Pinout Guide
-
-### 1. Sơ Đồ Đấu Nối Tổng Thể (Complete Wiring Matrix)
-
-| Module / Thiết Bị | Node 1: STM32F746G-DISCO | Module Transceiver 1 | Module Transceiver 2 | Node 2: STM32F103 (Blue Pill) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Logic RX** | **PB8** (CN7 Pin 10 - SCL/D15) | **RXD** | — | — |
-| **Logic TX** | **PB9** (CN7 Pin 9 - SDA/D14) | **TXD** | — | — |
-| **Power (3.3V)** | **3.3V** (CN6 Pin 4) | **3V3 / VCC** | — | — |
-| **Ground** | **GND** (CN6 Pin 6/7) | **GND** ──────┐ | ┌────── **GND** | **GND** |
-| **Power (3.3V)** | — | — | **3V3 / VCC** | **3.3V** |
-| **Logic RX** | — | — | **RXD** | **PA11** (hoặc PB8 nếu Remap) |
-| **Logic TX** | — | — | **TXD** | **PA12** (hoặc PB9 nếu Remap) |
-| **Bus vi sai CAN_H** | — | **CAN_H** ─────────── | ─────────── **CAN_H** | — |
-| **Bus vi sai CAN_L** | — | **CAN_L** ─────────── | ─────────── **CAN_L** | — |
-
----
-
-### 2. Vị Trí Chân Cắm Thực Tế Trên STM32F746G-DISCO (Mặt Dưới / Bottom Side)
-
-> ⚠️ **LƯU Ý QUAN TRỌNG:** Mặt trước của bo mạch F746 bị màn hình LCD che kín. **Toàn bộ các hàng rào cắm Arduino (Header cái màu đen) nằm ở MẶT SAU (Bottom) của bo mạch**.
-
-```text
-                                MẶT DƯỚI (BOTTOM) BO MẠCH STM32F746G-DISCO
-       ┌────────────────────────────────────────────────────────────────────────┐
-       │                        [Cổng USB ST-LINK / VCP]                        │
-       │                                                                        │
-       │   [CN6: Hàng Nguồn Power 8 chân]        [CN7: Hàng Digital 10 chân]     │
-       │   ┌────────────────────────────┐        ┌────────────────────────────┐ │
-       │   │ Pin 1: IOREF               │        │ Pin 1:  D8  (PI2)          │ │
-(MÉP   │   │ Pin 2: RESET (NRST)        │        │ Pin 2:  D9  (PA15)         │ │ (MÉP
-TRÁI)  │   │ Pin 3: NC / Reserved       │        │ Pin 3:  D10 (PI0 - STB)    │ │ PHẢI)
-       │   │ Pin 4: +3V3  ◄── [CẤP 3V3] │        │ Pin 4:  D11 (PB15)         │ │
-       │   │ Pin 5: +5V                 │        │ Pin 5:  D12 (PB14)         │ │
-       │   │ Pin 6: GND   ◄── [NỐI GND] │        │ Pin 6:  D13 (PI1 - LED)    │ │
-       │   │ Pin 7: GND                 │        │ Pin 7:  GND                │ │
-       │   │ Pin 8: VIN                 │        │ Pin 8:  AREF               │ │
-       │   └────────────────────────────┘        │ Pin 9:  D14 (SDA) ◄── PB9  │ │ (CAN1_TX)
-       │                                         │ Pin 10: D15 (SCL) ◄── PB8  │ │ (CAN1_RX)
-       │   [CN5: Hàng Analog 6 chân]             └────────────────────────────┘ │
-       │   ┌────────────────────────────┐        [CN4: Hàng Digital 8 chân]     │
-       │   │ A0 - A5                    │        ┌────────────────────────────┐ │
-       │   └────────────────────────────┘        │ D0 - D7                    │ │
-       │                                         └────────────────────────────┘ │
-       └────────────────────────────────────────────────────────────────────────┘
-```
-
-* **Chân CAN1_RX (PB8)**: Cắm vào **CN7 Pin 10** (In chữ `D15` hoặc `SCL` sát góc dưới cùng bên phải).
-* **Chân CAN1_TX (PB9)**: Cắm vào **CN7 Pin 9** (In chữ `D14` hoặc `SDA` kế bên pin 10).
-* **Chân Nguồn**: Cắm vào **CN6 Pin 4** (`3.3V`) và **CN6 Pin 6** (`GND`).
-* **Quy tắc nối dây Transceiver**: Vi điều khiển `TX` nối vào chân `TX` của Transceiver, vi điều khiển `RX` nối vào chân `RX` của Transceiver (**Nối thẳng, không nối chéo**).
-* **Điện trở đầu cuối (Terminating Resistors)**: Đảm bảo cắm jumper trở **120Ω** trên cả 2 module transceiver để đảm bảo phối hợp trở kháng trên đường truyền vi sai 500 kbps.
-
----
-
-## 📡 CAN Network & DBC Specification
-
-| Thông Số Mạng | Giá Trị Thực Thi | Cơ Sở & Quy Chuẩn Kỹ Thuật |
-| :--- | :--- | :--- |
-| **Baudrate** | **500 kbps** | Chuẩn High-Speed CAN Powertrain (ISO 11898-2) |
-| **Sample Point** | **83.33% - 87.5%** | Khuyến nghị CiA (BRP=4, Prop_Seg+Phase1=14, Phase2=3) |
-| **CAN ID** | `0x123` (Standard 11-bit) | Định danh gói tin động cơ `Engine_Telemetry_Msg` |
-| **Chu Kỳ Phát** | **100 ms (10 Hz)** | Chu kỳ phát tiêu chuẩn của hộp điều khiển động cơ (ECM) |
-| **Giao Thức Bảo Vệ** | **AUTOSAR E2E Profile 1** | CRC-8 SAE J1850 (Đa thức `0x2F`, Data ID `0x1A2B`) |
-
-### Bố Cục 8-Byte Payload Chuẩn Vector DBC
-
-```text
- ┌───────────┬───────────┬───────────┬───────────────────────┬───────────┬───────────┬───────────┐
- │  Byte 0   │  Byte 1   │  Byte 2   │   Byte 3  │  Byte 4   │  Byte 5   │  Byte 6   │  Byte 7   │
- ├───────────┼───────────┼───────────┼───────────────────────┼───────────┼───────────┼───────────┤
- │ E2E CRC-8 │ Alive Cnt │ Veh Speed │   Engine RPM (LSB:MSB)│ Cool Temp │ Reserved  │ Reserved  │
- │ (Poly 2F) │  (0 - 15) │ (0-250kph)│    (0 - 8000 RPM)     │(-40..150C)│  (0x00)   │  (0x00)   │
- └───────────┴───────────┴───────────┴───────────────────────┴───────────┴───────────┴───────────┘
-```
-
-* **Byte 0 (E2E Checksum)**: Tính toán theo đa thức SAE J1850 ($x^8 + x^4 + x^3 + x^2 + 1$), bảo vệ toàn vẹn Byte 1 -> Byte 7 kết hợp Data ID ẩn `0x1A2B`.
-* **Byte 1 (Rolling Counter)**: Tăng đơn điệu từ 0 đến 15 sau mỗi chu kỳ 100ms nhằm phát hiện lỗi Replay Attack hoặc rớt khung tin.
-* **Byte 2 (Vehicle Speed)**: $0 \div 250\text{ km/h}$, tỷ lệ 1 km/h / bit.
-* **Byte 3 - 4 (Engine RPM)**: $0 \div 8000\text{ RPM}$, định dạng Little-Endian 16-bit.
-* **Byte 5 (Coolant Temperature)**: Offset $-40^\circ\text{C}$, thang đo $-40 \div 150^\circ\text{C}$.
-
----
-
-## 🖥️ Live Diagnostic Terminal Showcase
-
-Giao diện dòng lệnh thời gian thực **Zephyr Interactive Shell** chạy trực tiếp qua cổng USB ST-LINK VCP UART (`115200 8-N-1`):
-
-```text
-ecu:~$ vehicle status
-+---------------------+-------------------+-------------------------------+
-| Parameter           | Current Value     | Engineering Unit / Range      |
-+---------------------+-------------------+-------------------------------+
-| Vehicle Speed       | 78.00 km/h        | Physical (0.00 - 250.00 km/h) |
-| Engine Speed        | 3250 RPM          | Crankshaft (0 - 8000 RPM)     |
-| Coolant Temperature | 90 deg C          | Engine Block (-40 to 150 C)   |
-| E2E Sequence Counter| 7                 | Monotonic Counter (0 - 15)    |
-| E2E Validation      | PASS              | CRC-8 SAE J1850 (Poly 0x2F)   |
-| CAN Bus Error Count | TEC=0, REC=0      | ISO 11898-1 Error Active      |
-| Telemetry Status    | RECEIVING (10 Hz) | Node 2 Live Link Healthy      |
-+---------------------+-------------------+-------------------------------+
-
-ecu:~$ dtc read
-Active Diagnostic Trouble Codes (0):
-  System Status: NORMAL (No faults detected, communication link active)
-
-# Khi rút dây bus CAN hoặc tắt nguồn Node 2:
-ecu:~$ dtc read
-Active Diagnostic Trouble Codes (1):
-  [DTC_U0100] Lost Communication With Powertrain ECM (Timeout > 500ms)
-
-# Khi cắm lại dây bus CAN và khôi phục đường truyền:
-ecu:~$ dtc clear
-DTC memory cleared successfully. System back to NORMAL state.
-```
-
----
-
-## 📊 Performance & Reliability Benchmarks
-
-Kiểm thử định lượng đo đạc trực tiếp trên phần cứng thật (STM32F746 + STM32F103 + Logic Analyzer 24MHz + DWT Cycle Counter):
-
-| Tiêu Chí Đo Lường | Giá Trị Thực Tế | Điều Kiện & Phương Pháp Kiểm Thử |
-| :--- | :--- | :--- |
-| **Bus Bitrate & Độ Lệch Mẫu** | **500 kbps @ 83.3%** | Đo bằng USB Logic Analyzer trên cặp dây vi sai |
-| **Tải CPU Node 1 @ 1000 frames/s** | **< 1.8%** | Đo qua Zephyr Thread Analyzer (`CONFIG_THREAD_ANALYZER=y`) |
-| **Thời Gian Bóc Tách DBC + E2E CRC**| **12.4 µs / frame** | Đo bằng ARM Cortex-M7 DWT Cycle Counter (216 MHz) |
-| **Độ Trễ Phản Ứng (ISR -> Task)** | **< 15 µs** | Đo bằng gạt chân GPIO ra máy hiện sóng (Oscilloscope) |
-| **Thời Gian Phục Hồi Bus-Off (ISO 11898-1)**| **< 100 ms** | Thuật toán FSM tự động khôi phục không cần reset vi điều khiển |
-| **Bộ Nhớ RAM Tiêu Thụ (Node 1)** | **14.2 KB SRAM** | Chiếm ~4.4% trên tổng 320 KB RAM có sẵn |
-| **Dung Lượng Flash Firmware (Node 1)** | **38.6 KB Flash** | Chiếm ~3.7% trên tổng 1024 KB Flash |
-
----
-
-## 🔄 System Behavior & Multithreaded Workflow
-
-Hệ thống hoạt động theo luồng cộng tác giữa 2 Node phần cứng và 3 Threads trên Zephyr RTOS:
+## 🧭 Kiến Trúc Tổng Quan
 
 ```mermaid
-flowchart TD
-    subgraph NODE2["NODE 2: STM32F103 ECU Simulator (100ms Loop)"]
-        GenData[Tạo dữ liệu động cơ: Speed, RPM, Temp]
-        CalcE2E[Tính AUTOSAR E2E CRC-8 & Alive Counter]
-        PackDBC[Đóng gói 8-Byte Frame ID 0x123]
-        SendCAN[Gửi qua bxCAN Mailbox 0 @ 500kbps]
-        GenData --> CalcE2E --> PackDBC --> SendCAN
-    end
+sequenceDiagram
+    autonumber
+    participant N2 as Node 2 — STM32F103C8T6 (Bare-Metal)
+    participant Bus as CAN Bus vật lý 500 kbps (CAN_H / CAN_L, 2 IC Transceiver + trở 120Ω)
+    participant N1 as Node 1 — STM32F746NG (Zephyr RTOS)
 
-    SendCAN -->|Đường truyền vi sai CAN_H / CAN_L| CANFilter
-
-    subgraph NODE1["NODE 1: STM32F746 Telematics Gateway (Zephyr RTOS)"]
-        CANFilter[Bộ lọc phần cứng bxCAN1] -->|can_add_rx_filter_msgq| Queue[(k_msgq Ring Buffer)]
-
-        subgraph THREAD1["Thread 1: CAN Ingestion Worker (Priority 2)"]
-            Queue --> Pull[Lấy Frame từ k_msgq]
-            Pull --> DecodeDBC[Giải mã Vector DBC]
-            DecodeDBC --> CheckE2E{Kiểm tra E2E CRC8 & Counter?}
-            CheckE2E -- Hợp Lệ --> SaveState[Cập nhật Vehicle State - k_mutex]
-            CheckE2E -- Thất Bại --> LogE2E[Ghi nhận lỗi hỏng khung tin]
-        end
-
-        subgraph THREAD2["Thread 2: Safety Supervisor (Chu kỳ 100ms)"]
-            SaveState --> CheckTimeout{Mất tin nhắn > 500ms?}
-            CheckTimeout -- Có --> TriggerDTC[Kích hoạt lỗi DTC_U0100]
-            CheckTimeout -- Không --> Heartbeat[Toggle LED PI1 Heartbeat]
-        end
-
-        subgraph THREAD3["Thread 3: Interactive Shell CLI (Priority 10)"]
-            UserIn[Lệnh người dùng: vehicle status, dtc] --> AccessData[Đọc dữ liệu qua k_mutex]
-            AccessData --> FormattedOutput[In bảng thông số ANSI Terminal]
-        end
-    end
+    N2->>N2: Mô phỏng cảm biến (tốc độ, RPM, tay số, mô-men, áp lực phanh)
+    N2->>N2: Đóng gói 3 bản tin DBC + CRC-8 + Rolling Counter riêng từng ID
+    N2->>Bus: CAN1_Transmit() x3 — round-robin qua 3 Mailbox phần cứng TME0/1/2
+    Bus->>N1: bxCAN nhận, Filter Bank lọc dải ID 0x120-0x127
+    N1->>N1: can_worker_thread — giải mã DBC theo ID + xác thực CRC-8/Rolling Counter (delta-based)
+    N1->>N1: safety_thread mỗi 200ms — kiểm tra ngưỡng nhiệt độ/RPM, cập nhật DTC, nhấp nháy LED
+    N1-->>N1: Shell CLI: "vehicle status", "can stat", "dtc read"
 ```
 
----
-
-## 🛡️ Safety Architecture & AUTOSAR E2E
-
-Hệ thống tích hợp các tiêu chuẩn an toàn chức năng theo kiến trúc chuẩn Automotive:
-
-1. **AUTOSAR E2E Profile 1:** 
-   - Kiểm tra toàn vẹn dữ liệu 3 lớp: Mã nhận diện dữ liệu bí mật (**16-bit Data ID**), bộ đếm thứ tự đơn điệu (**4-bit Rolling Counter**) để chống tấn công phát lại (Replay Attack), và đa thức kiểm tra lỗi (**CRC-8 SAE J1850**).
-2. **Cơ Chế Tự Phục Hồi Bus-Off (ISO 11898-1):** 
-   - Khi đường bus CAN bị chập hoặc nhiễu nặng dẫn đến cờ lỗi `BOFF` bật lên, hệ thống phát hiện tức thời qua callback `can_set_state_change_callback()` và tự động tái khởi động CAN controller khi bus ổn định trở lại mà không gây sập RTOS.
-3. **Phần Cứng Bảo Vệ Bộ Nhớ ARM Cortex-M7 MPU:** 
-   - Kích hoạt `CONFIG_ARM_MPU=y` và `CONFIG_MPU_STACK_GUARD=y` tạo vùng đệm phần cứng (Hardware Guard Band) lập tức kích hoạt HardFault nếu luồng CAN hoặc Shell làm tràn Stack.
-4. **Đồng Bộ Dữ Liệu Chống Đảo Ngược Mức Ưu Tiên (Priority Inversion Safe):** 
-   - Dùng `k_mutex` hỗ trợ thuật toán Priority Inheritance bảo vệ cấu trúc dữ liệu xe chia sẻ giữa luồng CAN Worker (Priority cao) và luồng Shell (Priority thấp).
+Node 2 vừa là bài thực hành lập trình **bare-metal thanh ghi bxCAN** (RM0008), Node 1 vừa là bài thực hành dùng đúng **framework RTOS công nghiệp thật** (Zephyr) — hai đầu của phổ trừu tượng hoá trong cùng một hệ thống.
 
 ---
 
-## 🚀 1-Click Build & Quick Start Guide
+## 📌 Tính Năng Chính
 
-Dự án cung cấp Menu tương tác 1-Click giúp biên dịch, nạp firmware và chẩn đoán toàn bộ 2 Node mà không cần gõ lệnh phức tạp:
+* **Mạng CAN 2 node thật, không loopback:** 2 board vật lý tách biệt, nối qua bus vi sai CAN_H/CAN_L với 2 IC Transceiver và điện trở đầu cuối 120Ω — kiểm chứng đúng tầng vật lý, không mô phỏng nội bộ.
+* **3 bản tin CAN theo đúng hệ thống con ô tô:** `0x123` Engine (tốc độ/RPM/nhiệt độ nước), `0x124` Transmission (tay số/mô-men xoắn), `0x125` Chassis (áp lực phanh) — mỗi bản tin có Rolling Counter riêng, phát gần như đồng thời qua 3 Mailbox phần cứng của bxCAN.
+* **Xác thực 2 lớp AUTOSAR E2E Profile 1:** CRC-8 (đa thức SAE J1850 `0x2F`, tính bằng bảng tra Lookup Table 256 phần tử) + Rolling Counter kiểu delta (phân biệt khung trùng lặp / rớt 1 khung / rớt nhiều khung).
+* **Bộ lọc phần cứng theo dải ID:** 1 Filter Bank (`id=0x120, mask=0x7F8`) lọc trọn cả 3 bản tin hiện tại và chừa chỗ mở rộng thêm ECU mới trong cùng dải mà không cần thêm filter.
+* **Giám sát an toàn thời gian thực (DTC):** phát hiện quá nhiệt động cơ (>105°C → `DTC_P0115`), quá vòng tua (>6500 RPM → `DTC_P0219`), mất tín hiệu CAN >1000ms (`DTC_U0100`), nhấp nháy LED cảnh báo (PI1).
+* **Thống kê mạng CAN thời gian thực:** tổng số khung, tỉ lệ hợp lệ E2E, số lỗi CRC, số khung rớt, đếm riêng theo từng ID — qua lệnh `can stat`.
+* **Bộ mô phỏng & bơm lỗi tích hợp trong Node 1:** `sim_thread` tự phát dữ liệu xe chạy (không cần Node 2 thật), lệnh `can inject overheat/overspeed/corrupt` để chủ động kiểm tra lớp an toàn.
+* **Chẩn đoán qua Zephyr Shell CLI:** console tương tác qua UART (`vehicle status`, `dtc read/clear`, `can sim/auto/inject/stat/stat_reset`), không cần công cụ ngoài.
+* **Bảo vệ ngăn xếp bằng MPU:** `CONFIG_HW_STACK_PROTECTION` + `CONFIG_MPU_STACK_GUARD` phát hiện tràn stack ngay lập tức thay vì âm thầm ghi đè bộ nhớ.
 
-### Cách 1: Sử dụng Menu 1-Click (Khuyến nghị)
-Nhấp đúp chuột vào file [`build_all.bat`](file:///d:/Project/STM32F7/zephyr_project/scripts/build_all.bat) trong thư mục `scripts/` (hoặc chạy từ root):
+---
+
+## 📨 Định Dạng Bản Tin CAN (Vector DBC)
+
+Cả 3 bản tin dùng chung layout Byte 0-1 (CRC-8 + Rolling Counter) theo chuẩn AUTOSAR E2E, khác nhau ở Byte 2-5 (payload tín hiệu):
+
+| Byte | `0x123` — Engine (MB0) | `0x124` — Transmission (MB1) | `0x125` — Chassis/Brake (MB2) |
+| :--- | :--- | :--- | :--- |
+| 0 | E2E CRC-8 (poly `0x2F`, seed `0xFF`, XOR-out `0xFF`, Data ID `0x1A2B`) | *(giống cột trái)* | *(giống cột trái)* |
+| 1 | Rolling Counter 4-bit (0-15, modulo 16, **riêng theo từng ID**) | *(giống, bộ đếm độc lập)* | *(giống, bộ đếm độc lập)* |
+| 2 | Vehicle Speed — 0-240 km/h, factor 1, Little-Endian | Gear Position — số 1-5 | Brake Pressure — % |
+| 3-4 | Engine RPM — Little-Endian, factor 0.25 (`raw = data[3]\|(data[4]<<8)`, `RPM = raw>>2`) | Engine Torque (Nm) — Little-Endian | Wheel Speed — Little-Endian |
+| 5 | Coolant Temp — `raw = temp + 40` | Oil Temp — `raw = temp + 40` | Pad Temp — `raw = temp + 40` |
+| 6-7 | Reserved `0x00` | Reserved `0x00` | Reserved `0x00` |
+
+DLC = 8 bytes cho cả 3 bản tin; Standard ID 11-bit.
+
+---
+
+## 🔄 Luồng Dữ Liệu End-to-End
+
+1. **Node 2** đọc cảm biến giả lập mỗi 100ms, đóng gói cả 3 bản tin, tính CRC-8 (bảng tra) + tăng Rolling Counter riêng từng ID.
+2. **`CAN1_Transmit()`** quét cờ `TME0/TME1/TME2`, chọn Mailbox phần cứng đang rảnh cho từng bản tin — 3 khung được nạp gần như đồng thời thay vì xếp hàng chờ nhau.
+3. Bus vật lý phân xử theo cơ chế bitwise arbitration (ID nhỏ hơn thắng) — `0x123` luôn được phát trước `0x124`, `0x124` trước `0x125` nếu đụng độ.
+4. **Node 1** nhận qua Filter Bank dải `0x120-0x127`, đẩy vào `k_msgq` (Zero-CPU khi rảnh).
+5. **`can_worker_thread`** (ưu tiên 5) giải mã theo `switch(can_id)`, xác thực CRC-8 + Rolling Counter delta, gộp kết quả vào 1 struct `VehicleTelemetry_t` dùng chung (mỗi ID chỉ cập nhật đúng các trường liên quan, giữ nguyên giá trị các trường khác).
+6. **`safety_thread`** (ưu tiên 6) quét mỗi 200ms, so ngưỡng nhiệt độ/RPM, cập nhật DTC, điều khiển LED cảnh báo (PI1).
+7. Người dùng truy vấn qua **Shell CLI** trên UART: `vehicle status`, `can stat`, `dtc read`.
+
+---
+
+## ⚙️ Yêu Cầu Phần Cứng
+
+| Hạng mục | Node 1 (Gateway) | Node 2 (ECU Simulator) |
+| :--- | :--- | :--- |
+| **Board** | STM32F746G-Discovery | STM32F103C8T6 "Blue Pill" |
+| **Toolchain** | West + Zephyr SDK (`arm-zephyr-eabi-gcc`) | `arm-zephyr-eabi-gcc`/`arm-none-eabi-gcc` (Makefile, CMake, hoặc Keil `uvprojx`) |
+| **IC Transceiver CAN** | 1x module (SN65HVD230 3.3V hoặc TJA1050 5V) | 1x module (khuyến nghị SN65HVD230 3.3V cho Blue Pill) |
+| **Khác** | Cáp Mini-USB (ST-LINK) | Mạch nạp ST-LINK/USB-TTL rời (Blue Pill không có ST-LINK on-board) |
+| **Chung** | 2 dây xoắn đôi CAN_H/CAN_L nối giữa 2 module Transceiver, 2 điện trở đầu cuối 120Ω (mỗi module 1 cái, đo tổng ~60Ω khi ngắt nguồn), dây mass chung |
+
+---
+
+## 🔌 Sơ Đồ Đấu Dây
 
 ```text
-==========================================================
-   AUTOMOTIVE CAN NETWORK: 2-NODE SYSTEM MANAGER
-==========================================================
- [1] Compile Node 1 (STM32F7 Zephyr Gateway)
- [2] Compile Node 2 (STM32F103 ECU Simulator)
- [3] >> COMPILE BOTH NODES (1-CLICK) <<
- [4] Flash Node 1 (STM32F7) via ST-LINK
- [5] Flash Node 2 (STM32F103) via ST-LINK
- [6] Launch Zephyr Shell Diagnostic Terminal (COM4)
- [7] Clean All Build Artifacts
- [0] Exit
-==========================================================
+[ Node 2: STM32F103 (ECU Simulator) ]            [ Node 1: STM32F746 (Zephyr Gateway) ]
+  Module Transceiver 1                             Module Transceiver 2
+  ┌─────────────────┐                              ┌─────────────────┐
+  │      CAN_H ─────┼────── CAN_H (dây xoắn đôi) ──┼───── CAN_H      │
+  │    [Trở 120Ω]   │                              │   [Trở 120Ω]    │
+  │      CAN_L ─────┼────── CAN_L (dây xoắn đôi) ──┼───── CAN_L      │
+  │      GND ───────┼────── Dây mass chung ────────┼───── GND        │
+  └─────────────────┘                              └─────────────────┘
 ```
 
-### Cách 2: Thao tác dòng lệnh thủ công
-1. **Biên dịch & Nạp Node 1 (Zephyr Gateway):**
-   ```bash
-   cd source/node1_stm32f7_gateway
-   west build -b stm32f746g_disco -d ../../build/node1_zephyr
-   west flash -d ../../build/node1_zephyr
-   ```
-2. **Biên dịch & Nạp Node 2 (STM32F103 ECU):**
-   ```bash
-   cd source/node2_stm32f103_ecu
-   make -j4
-   # Hoặc mở file stm32f103_node.uvprojx bằng Keil uVision 5 và nhấn F7
-   ```
-3. **Mở cổng chẩn đoán Zephyr Shell:**
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File ./scripts/ecu.ps1
-   ```
+<details>
+<summary><b>👉 Chi tiết chân nối từng board</b></summary>
+
+**Node 1 (STM32F746G-Discovery):**
+| Tín hiệu | Chân | Ghi chú |
+| :--- | :--- | :--- |
+| CAN1_RX / CAN1_TX | PB8 / PB9 | Khai báo qua `pinctrl-0` trong `app.overlay` |
+| Transceiver STB (Standby) | PI0 | Kéo LOW để đánh thức IC Transceiver trước khi init CAN |
+| LED cảnh báo (Warning) | PI1 | Nhấp nháy khi có DTC active |
+
+**Node 2 (STM32F103 Blue Pill):**
+| Tín hiệu | Chân mặc định | Chân Remap (`USE_CAN_REMAP_PB8_PB9=1`) |
+| :--- | :--- | :--- |
+| CAN_RX / CAN_TX | PA11 / PA12 | PB8 / PB9 |
+| LED báo hiệu chu kỳ phát | PC13 | — |
+
+*(Nếu dùng module TJA1050 thay vì SN65HVD230: cấp nguồn 5V cho Transceiver, nối chân STB/Rs xuống GND.)*
+</details>
 
 ---
 
-## 🗂️ Project Directory Structure
+## 🚀 Bắt Đầu Nhanh
 
-Dự án được phân tách cấu trúc 100% độc lập giữa Mã nguồn (`source/`), Kết quả biên dịch (`build/`), Script tự động hóa (`scripts/`) và Tài liệu hướng dẫn (`docs/`):
+### Node 1 — STM32F746NG Telematics Gateway
+
+```bash
+cd node1_stm32f7_gateway
+west build -b stm32f746g_disco .
+west flash
+```
+Mở terminal UART (115200 baud) để thấy log khởi động và gõ lệnh Shell. Mặc định firmware chạy ở `CAN_MODE_NORMAL` (nhận qua PB8/PB9 thật) — muốn tự test độc lập không cần Node 2, build thêm cờ `-DUSE_CAN_LOOPBACK_MODE=1` hoặc bật dòng `/* loopback; */` trong `app.overlay`, kết hợp lệnh `can auto on` để `sim_thread` tự phát dữ liệu.
+
+### Node 2 — STM32F103C8T6 ECU Simulator
+
+```bash
+cd node2_stm32f103_ecu
+make            # hoặc: cmake -B build && cmake --build build
+```
+Nạp `stm32f103_node.bin`/`.hex` bằng ST-LINK hoặc USB-TTL (bootloader UART). Đèn LED PC13 nhấp nháy đều 100ms xác nhận đang phát dữ liệu thành công. Dự án cũng kèm sẵn `stm32f103_node.uvprojx` cho ai quen dùng Keil MDK.
+
+**Kiểm thử toàn hệ thống:** nạp cả 2 board, nối bus CAN như sơ đồ trên, mở Shell của Node 1, gõ `can stat` — số đếm cả 3 ID (`id_123/124/125_count`) phải tăng đều nhau ở tần số 10Hz; gõ `vehicle status` để xem dữ liệu gộp từ cả 3 bản tin.
+
+---
+
+## 💻 Bộ Lệnh Chẩn Đoán (Zephyr Shell CLI)
+
+| Lệnh | Chức năng |
+| :--- | :--- |
+| `vehicle status` | Hiển thị tốc độ, RPM, nhiệt độ nước, tay số, mô-men xoắn, áp lực phanh, trạng thái E2E |
+| `dtc read` | Liệt kê các mã lỗi chẩn đoán (DTC) đang active |
+| `dtc clear` | Xoá toàn bộ DTC |
+| `can stat` | Thống kê mạng CAN: tổng khung, tỉ lệ hợp lệ, lỗi CRC, khung rớt, đếm riêng theo từng ID |
+| `can stat_reset` | Đặt lại toàn bộ thống kê về 0 |
+| `can sim <speed_kmh>` | Phát thủ công 1 khung dữ liệu giả lập |
+| `can auto <on\|off>` | Bật/tắt `sim_thread` tự phát dữ liệu xe chạy 5Hz (dùng khi test không có Node 2) |
+| `can inject <overheat\|overspeed\|corrupt>` | Chủ động bơm lỗi để kiểm tra lớp an toàn AUTOSAR E2E và DTC |
+
+---
+
+## 🗂️ Cấu Trúc Thư Mục
 
 ```text
-zephyr_project/
-├── README.md                           # Tài liệu tổng quan toàn bộ hệ thống 2 Node
-├── scripts/                            # Các công cụ điều phối & chẩn đoán
-│   ├── build_all.bat                   # Menu 1-click tương tác CLI
-│   ├── build_all.ps1                   # Script PowerShell tự động hóa build cả 2 Node
-│   ├── build_node1.ps1                 # Script build & flash riêng Node 1 (Zephyr)
-│   ├── build_node2.ps1                 # Script build & flash riêng Node 2 (STM32F103)
-│   └── ecu.ps1                         # Shell Terminal client tương tác qua COM port
-│
-├── source/                             # MÃ NGUỒN GỐC (100% PURE SOURCE)
-│   ├── node1_stm32f7_gateway/          # >>> NODE 1: STM32F7 ZEPHYR GATEWAY <<<
-│   │   ├── CMakeLists.txt              # Cấu hình biên dịch Zephyr RTOS
-│   │   ├── prj.conf                    # Kconfig: CAN, Shell, ARM MPU, Thread Analyzer
-│   │   ├── app.overlay                 # DeviceTree: Map chân CAN1 (PB8/PB9) & LED
-│   │   └── src/
-│   │       ├── main.c                  # Khởi tạo các luồng RTOS & Heartbeat
-│   │       ├── can_gateway.c / .h      # Quản lý hàng đợi k_msgq & Bus-Off recovery
-│   │       ├── dbc_decoder.c / .h      # Fixed-point DBC unpacking & AUTOSAR CRC-8
-│   │       ├── safety_monitor.c / .h   # Giám sát timeout & ghi nhận mã lỗi DTC
-│   │       └── diag_shell.c            # Bộ lệnh chẩn đoán tương tác Shell CLI
-│   │
-│   └── node2_stm32f103_ecu/            # >>> NODE 2: STM32F103 ECU SIMULATOR <<<
-│       ├── stm32f103_node.uvprojx      # File Project mở trực tiếp bằng Keil uVision 5
-│       ├── CMakeLists.txt / Makefile   # Hỗ trợ build đa nền tảng CMake / Make
-│       ├── startup_stm32f103c8tx.s     # Vector table & startup assembly Cortex-M3
-│       ├── stm32f103c8tx.ld            # Linker script 64KB Flash, 20KB SRAM
-│       ├── README.md                   # Hướng dẫn kỹ thuật chuyên sâu Node 2
-│       ├── include/
-│       │   ├── can_f103.h              # Định nghĩa thanh ghi bxCAN & struct frame
-│       │   └── e2e_encoder.h           # Thuật toán AUTOSAR E2E & đóng gói DBC
-│       └── src/
-│           ├── main.c                  # Clock 72MHz, SysTick 1ms, vòng lặp 100ms
-│           ├── can_f103.c              # Driver thanh ghi Bare-metal bxCAN1 500kbps
-│           └── e2e_encoder.c           # Tính toán Rolling Counter & CRC-8 SAE J1850
-│
-├── build/                              # TẤT CẢ FILE THỰC THI (.ELF, .HEX, .BIN)
-│   ├── node1_zephyr/                   # Firmware Node 1 (zephyr.hex, zephyr.elf)
-│   └── node2_f103/                     # Firmware Node 2 (stm32f103_node.hex, .elf)
-│
-└── docs/                               # TÀI LIỆU KỸ THUẬT & CẨM NANG CHI TIẾT
-    └── TWO_NODES_PROJECT_MANUAL.md     # Cẩm nang phần cứng, quy trình test bench A-Z
+automotive_can_gateway_cluster/
+├── node1_stm32f7_gateway/          # Node 1 — Zephyr RTOS, STM32F746NG
+│   ├── src/
+│   │   ├── main.c                  # 2 thread chính (can_worker prio5, safety prio6)
+│   │   ├── can_gateway.c/.h        # Init CAN, Transceiver STB, Filter Bank dải ID
+│   │   ├── dbc_decoder.c/.h        # Giải mã DBC theo ID, xác thực E2E, thống kê
+│   │   ├── safety_monitor.c/.h     # Máy trạng thái DTC
+│   │   └── diag_shell.c            # Shell CLI + sim_thread (prio7) + bộ bơm lỗi
+│   ├── app.overlay                 # Devicetree: chân CAN1, LED, Transceiver STB
+│   ├── prj.conf                    # Kconfig: CAN, Shell, MPU Stack Guard, Log
+│   └── CMakeLists.txt
+├── node2_stm32f103_ecu/            # Node 2 — Bare-Metal, STM32F103C8T6
+│   ├── src/
+│   │   ├── main.c                  # Vòng lặp mô phỏng cảm biến + phát 3 bản tin/100ms
+│   │   ├── can_f103.c               # Driver bxCAN thanh ghi trực tiếp, TX round-robin 3 Mailbox
+│   │   └── e2e_encoder.c            # Đóng gói DBC + CRC-8 (Lookup Table) cho 3 loại bản tin
+│   ├── include/can_f103.h, e2e_encoder.h
+│   ├── startup_stm32f103c8tx.s     # Vector table & reset handler
+│   ├── stm32f103c8tx.ld            # Linker script
+│   ├── Makefile / CMakeLists.txt / stm32f103_node.uvprojx  # 3 cách build tương đương
+│   └── README.md                   # Tài liệu riêng chi tiết đấu dây/build Node 2
+└── README.md                       # File này — tổng quan toàn hệ thống
 ```
 
 ---
 
-## 👥 Author Information
+## ⚠️ Giới Hạn Hiện Tại & Hướng Phát Triển
 
-* **Kỹ Sư Dự Án:** Trần Huỳnh
-* **Chuyên Ngành:** Kỹ Thuật Máy Tính (Computer Engineering Technology)
-* **Khoa:** Khoa Điện - Điện Tử (FEEE)
-* **Trường:** Trường Đại học Sư phạm Kỹ thuật TP. Hồ Chí Minh (HCMUTE)
-* **Email:** [huynhtran30112004@gmail.com](mailto:huynhtran30112004@gmail.com)
-* **GitHub:** [HuynhTran112](https://github.com/HuynhTran112)
+Ghi rõ để README luôn khớp đúng những gì code thật đang làm:
+
+* **`safety_monitor` mới kiểm tra 2 ngưỡng từ bản tin Engine** (nhiệt độ nước >105°C, RPM >6500) — chưa có DTC riêng cho áp lực phanh bất thường (`0x125`) hay mô-men xoắn/tay số bất thường (`0x124`), dù dữ liệu đã được giải mã đầy đủ. Hướng mở rộng tự nhiên: thêm ngưỡng cho 2 bản tin mới.
+* **Node 1 không tự tay cấu hình `CAN_BTR`** — Zephyr tự tính bit-timing từ `sample-point=<875>` trong Devicetree. Việc cấu hình thanh ghi bằng tay ở mức bare-metal chỉ có thật ở Node 2.
+* **`can_add_rx_filter_msgq()` là 1 dòng gọi Zephyr driver** — toàn bộ ISR đọc FIFO/giải phóng `RFOM0` nằm trong driver `can_stm32_bxcan` có sẵn của Zephyr, không phải code tự viết trong project.
+* **Node 2 mặc định lọc accept-all** (`CAN1_Filter_Config(0x000, 0x000)`) — không lọc theo ID vì chỉ cần nghe phản hồi từ Node 1 khi debug hai chiều.
+* **Chưa có xử lý mất kết nối vật lý giữa chừng ở Node 2** (rút Transceiver, đứt dây) — lỗi Acknowledge chỉ được phát hiện gián tiếp qua việc CAN1_Transmit trả về false khi mailbox không giải phóng, chưa có cơ chế phục hồi tự động riêng.
+
+Chi tiết đầy đủ hơn về lý thuyết CAN Bus, Zephyr RTOS, và các bug đã gặp trong quá trình phát triển: xem `project1_can_gateway_interview.md` (tài liệu học/ôn tập kèm theo).
+
+---
+
+## 👥 Thông Tin Tác Giả
+
+* **Major:** Computer Engineering Technology
+* **Institution:** Ho Chi Minh City University of Technology and Education (HCMUTE)
