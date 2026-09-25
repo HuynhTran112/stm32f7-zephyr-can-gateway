@@ -32,22 +32,35 @@ Một hệ thống **2 vi điều khiển giao tiếp qua CAN Bus vật lý**, m
 ## 🧭 Kiến Trúc Tổng Quan
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant N2 as Node 2 — STM32F103C8T6 (Bare-Metal)
-    participant Bus as CAN Bus vật lý 500 kbps (CAN_H / CAN_L, 2 IC Transceiver + trở 120Ω)
-    participant N1 as Node 1 — STM32F746NG (Zephyr RTOS)
+flowchart LR
+    subgraph B2["🔧 NODE 2 — STM32F103C8T6"]
+        direction TB
+        S2["Cảm biến giả lập<br/>speed · rpm · gear · torque · brake"]
+        E2["DBC Encoder<br/>CRC-8 + Rolling Counter"]
+        M2["3x TX Mailbox"]
+        S2 --> E2 --> M2
+    end
 
-    N2->>N2: Mô phỏng cảm biến (tốc độ, RPM, tay số, mô-men, áp lực phanh)
-    N2->>N2: Đóng gói 3 bản tin DBC + CRC-8 + Rolling Counter riêng từng ID
-    N2->>Bus: CAN1_Transmit() x3 — round-robin qua 3 Mailbox phần cứng TME0/1/2
-    Bus->>N1: bxCAN nhận, Filter Bank lọc dải ID 0x120-0x127
-    N1->>N1: can_worker_thread — giải mã DBC theo ID + xác thực CRC-8/Rolling Counter (delta-based)
-    N1->>N1: safety_thread mỗi 200ms — kiểm tra ngưỡng nhiệt độ/RPM, cập nhật DTC, nhấp nháy LED
-    N1-->>N1: Shell CLI: "vehicle status", "can stat", "dtc read"
+    M2 ==>|"CAN_H / CAN_L · 500 kbps"| BUS(("CAN Bus"))
+    BUS ==> F1
+
+    subgraph B1["🖥️ NODE 1 — STM32F746NG"]
+        direction TB
+        F1["Filter Bank<br/>0x120–0x127"] --> Q1[("k_msgq")]
+        Q1 --> W1["can_worker<br/>decode + E2E check"]
+        W1 --> D1[("telemetry<br/>+ DTC")]
+        D1 --> CLI1["Shell CLI"]
+    end
+
+    classDef node2 fill:#2d2d2d,stroke:#ff9800,color:#fff,stroke-width:2px
+    classDef node1 fill:#2d2d2d,stroke:#2196f3,color:#fff,stroke-width:2px
+    classDef bus fill:#1a1a1a,stroke:#4caf50,color:#4caf50,stroke-width:2px
+    class S2,E2,M2 node2
+    class F1,Q1,W1,D1,CLI1 node1
+    class BUS bus
 ```
 
-Node 2 vừa là bài thực hành lập trình **bare-metal thanh ghi bxCAN** (RM0008), Node 1 vừa là bài thực hành dùng đúng **framework RTOS công nghiệp thật** (Zephyr) — hai đầu của phổ trừu tượng hoá trong cùng một hệ thống.
+Node 2 phát 3 bản tin CAN mỗi 100ms, đóng vai ECU động cơ/hộp số/phanh. Node 1 nhận, giải mã theo AUTOSAR E2E, giám sát an toàn và trả lời qua Shell — bare-metal ở một đầu, Zephyr RTOS ở đầu còn lại.
 
 ---
 
@@ -108,16 +121,32 @@ DLC = 8 bytes cho cả 3 bản tin; Standard ID 11-bit.
 
 ## 🔌 Sơ Đồ Đấu Dây
 
-```text
-[ Node 2: STM32F103 (ECU Simulator) ]            [ Node 1: STM32F746 (Zephyr Gateway) ]
-  Module Transceiver 1                             Module Transceiver 2
-  ┌─────────────────┐                              ┌─────────────────┐
-  │      CAN_H ─────┼────── CAN_H (dây xoắn đôi) ──┼───── CAN_H      │
-  │    [Trở 120Ω]   │                              │   [Trở 120Ω]    │
-  │      CAN_L ─────┼────── CAN_L (dây xoắn đôi) ──┼───── CAN_L      │
-  │      GND ───────┼────── Dây mass chung ────────┼───── GND        │
-  └─────────────────┘                              └─────────────────┘
+```mermaid
+flowchart LR
+    subgraph N2["STM32F103"]
+        direction TB
+        MCU2["MCU"] --- TRX2["SN65HVD230"]
+    end
+    subgraph N1["STM32F746"]
+        direction TB
+        MCU1["MCU"] --- TRX1["SN65HVD230"]
+    end
+
+    R1["120Ω"] -.- TRX2
+    TRX2 ==>|"CAN_H"| TRX1
+    TRX2 ==>|"CAN_L"| TRX1
+    TRX2 -.->|"GND"| TRX1
+    TRX1 -.- R2["120Ω"]
+
+    classDef mcu fill:#1e3a5f,stroke:#64b5f6,color:#fff
+    classDef trx fill:#3e2723,stroke:#ffab40,color:#fff
+    classDef res fill:#1a1a1a,stroke:#888,color:#aaa,stroke-dasharray: 3 3
+    class MCU1,MCU2 mcu
+    class TRX1,TRX2 trx
+    class R1,R2 res
 ```
+
+Trở đầu cuối 120Ω gắn ở mỗi đầu bus — đo CAN_H/CAN_L khi ngắt nguồn phải ra khoảng 60Ω (2 trở song song).
 
 <details>
 <summary><b>👉 Chi tiết chân nối từng board</b></summary>
@@ -149,7 +178,11 @@ cd node1_stm32f7_gateway
 west build -b stm32f746g_disco .
 west flash
 ```
-Mở terminal UART (115200 baud) để thấy log khởi động và gõ lệnh Shell. Mặc định firmware chạy ở `CAN_MODE_NORMAL` (nhận qua PB8/PB9 thật) — muốn tự test độc lập không cần Node 2, build thêm cờ `-DUSE_CAN_LOOPBACK_MODE=1` hoặc bật dòng `/* loopback; */` trong `app.overlay`, kết hợp lệnh `can auto on` để `sim_thread` tự phát dữ liệu.
+Mở terminal UART (115200 baud) để thấy log khởi động và gõ lệnh Shell. Mặc định firmware chạy ở `CAN_MODE_NORMAL` (nhận qua PB8/PB9 thật). Muốn tự test độc lập không cần Node 2 thật, có 2 cách — cả hai đều cần **sửa file trước khi build** (macro `USE_CAN_LOOPBACK_MODE` chưa được nối vào `CMakeLists.txt` nên build flag `-D` không có tác dụng):
+1. Thêm dòng `target_compile_definitions(app PRIVATE USE_CAN_LOOPBACK_MODE)` vào `CMakeLists.txt`, hoặc
+2. Bỏ comment dòng `/* loopback; */` trong `app.overlay`.
+
+Sau đó kết hợp lệnh `can auto on` để `sim_thread` tự phát dữ liệu giả lập.
 
 ### Node 2 — STM32F103C8T6 ECU Simulator
 
@@ -209,15 +242,11 @@ automotive_can_gateway_cluster/
 
 ## ⚠️ Giới Hạn Hiện Tại & Hướng Phát Triển
 
-Ghi rõ để README luôn khớp đúng những gì code thật đang làm:
-
 * **`safety_monitor` mới kiểm tra 2 ngưỡng từ bản tin Engine** (nhiệt độ nước >105°C, RPM >6500) — chưa có DTC riêng cho áp lực phanh bất thường (`0x125`) hay mô-men xoắn/tay số bất thường (`0x124`), dù dữ liệu đã được giải mã đầy đủ. Hướng mở rộng tự nhiên: thêm ngưỡng cho 2 bản tin mới.
-* **Node 1 không tự tay cấu hình `CAN_BTR`** — Zephyr tự tính bit-timing từ `sample-point=<875>` trong Devicetree. Việc cấu hình thanh ghi bằng tay ở mức bare-metal chỉ có thật ở Node 2.
+* **Node 1 không tự tay cấu hình `CAN_BTR`** — Zephyr tự tính bit-timing từ `sample-point=<875>` trong Devicetree. Việc cấu hình thanh ghi bằng tay ở mức bare-metal chỉ có ở Node 2.
 * **`can_add_rx_filter_msgq()` là 1 dòng gọi Zephyr driver** — toàn bộ ISR đọc FIFO/giải phóng `RFOM0` nằm trong driver `can_stm32_bxcan` có sẵn của Zephyr, không phải code tự viết trong project.
 * **Node 2 mặc định lọc accept-all** (`CAN1_Filter_Config(0x000, 0x000)`) — không lọc theo ID vì chỉ cần nghe phản hồi từ Node 1 khi debug hai chiều.
-* **Chưa có xử lý mất kết nối vật lý giữa chừng ở Node 2** (rút Transceiver, đứt dây) — lỗi Acknowledge chỉ được phát hiện gián tiếp qua việc CAN1_Transmit trả về false khi mailbox không giải phóng, chưa có cơ chế phục hồi tự động riêng.
-
-Chi tiết đầy đủ hơn về lý thuyết CAN Bus, Zephyr RTOS, và các bug đã gặp trong quá trình phát triển: xem `project1_can_gateway_interview.md` (tài liệu học/ôn tập kèm theo).
+* **`CAN1_Transmit()` không thực sự phát hiện lỗi Acknowledge** — giá trị `false` nó trả về chỉ phản ánh "cả 3 Mailbox đang bận" (đọc cờ `TME0/1/2`), không đọc thanh ghi lỗi `CAN_ESR` (LEC/ACK error). Khi bus mất ACK thật (không có Node 1 lắng nghe), phần cứng bxCAN sẽ tự lặp lại việc gửi ở mức thấp (trừ khi bật `NART`), không có cơ chế phần mềm nào ở Node 2 chủ động phát hiện và báo lỗi việc này.
 
 ---
 
