@@ -3,7 +3,6 @@
 [![Node 1](https://img.shields.io/badge/Node%201-STM32F746NG%20(Cortex--M7%20%40%20216MHz)-red.svg)](#node-1-stm32f746ng-telematics-gateway)
 [![Node 2](https://img.shields.io/badge/Node%202-STM32F103C8T6%20(Cortex--M3%20%40%2072MHz)-orange.svg)](#node-2-stm32f103c8t6-ecu-simulator)
 [![RTOS](https://img.shields.io/badge/Node%201%20Firmware-Zephyr%20RTOS-blue.svg)](#node-1-stm32f746ng-telematics-gateway)
-[![Firmware](https://img.shields.io/badge/Node%202%20Firmware-100%25%20Bare--Metal-blue.svg)](#node-2-stm32f103c8t6-ecu-simulator)
 [![Protocol](https://img.shields.io/badge/Protocol-CAN%202.0B%20%2B%20AUTOSAR%20E2E%20Profile%201-green.svg)](#định-dạng-bản-tin-can-vector-dbc)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 
