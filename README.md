@@ -215,7 +215,7 @@ Demo chạy trên 2 board thật qua bus CAN 500 kbps, toàn bộ thao tác bằ
 
 ### 1. Trạng thái E2E khi rút và cắm lại dây
 
-![vehicle status](docs/images/demo-01-vehicle-status-e2e.jpg)
+![vehicle status](img/hinh1.jpg)
 
 Lệnh `vehicle status` hiển thị thông số xe kèm dòng **E2E Integrity**:
 - Dây còn cắm: `VALID (OK)`.
@@ -224,19 +224,19 @@ Lệnh `vehicle status` hiển thị thông số xe kèm dòng **E2E Integrity**
 
 ### 2. Rút dây: khung nhận ngừng tăng
 
-![unplug](docs/images/demo-02-unplug-frames-stop-u0100.jpg)
+![unplug](img/hinh2.jpg)
 
 `dtc read` báo `DTC_U0100` (mất tín hiệu CAN quá 1000 ms). Các lần `can stat` liên tiếp đều cho 912 frames: khi dây bị rút, bộ đếm khung nhận đứng yên. Số khung ở ba Mailbox vẫn chia đúng tỉ lệ 5 : 2 : 1 (`570 : 228 : 114`), khớp chu kỳ phát 20 / 50 / 100 ms của Node 2.
 
 ### 3. Cắm lại dây: khung nhận tăng tiếp, ghi nhận khung rớt
 
-![replug](docs/images/demo-03-replug-frames-resume.jpg)
+![replug](img/hinh3.jpg)
 
 Sau khi cắm lại, `can stat` tăng từ 912 lên 1113 frames. Mục `Frame bi rot tren bus` hiện 24: bộ giải mã nhận ra bước nhảy Rolling Counter và cộng dồn số khung đã bỏ lỡ trong lúc mất kết nối. `Frame sai ma CRC-8` vẫn bằng 0 vì dữ liệu nhận được không bị hỏng, chỉ mất một đoạn.
 
 ### 4. Xoá mã lỗi: một mã hoặc toàn bộ
 
-![dtc clear](docs/images/demo-04-dtc-clear.jpg)
+![dtc clear](img/hinh4.jpg)
 
 Khi hệ thống có nhiều mã lỗi, có thể xoá riêng từng mã đã xử lý xong hoặc xoá tất cả. Phiên này bắt đầu với `DTC_U0100` còn tồn đọng từ lần mất kết nối:
 1. `can inject overheat` và `can inject overspeed` thêm `DTC_P0115` và `DTC_P0219`; `dtc read` liệt kê 3 mã.
@@ -245,13 +245,13 @@ Khi hệ thống có nhiều mã lỗi, có thể xoá riêng từng mã đã x�
 
 ### 5. Khung sai CRC-8 (`can inject corrupt`)
 
-![crc](docs/images/demo-05-crc-corruption.jpg)
+![crc](img/hinh7.jpg)
 
 Mỗi lần bơm lỗi, log cảnh báo `Sai ma CRC-8` (ví dụ nhận `0xFD`, tính ra `0x57`) và shell báo số lần vi phạm E2E: `1/3`, `2/3`. Đến lần thứ 3, `safety_monitor` ghi `DTC_U0401` (dữ liệu sai lệch). Lệnh `can stat` cho biết cụ thể số khung sai CRC (tăng từ 1 lên 3) trong khi các khung hợp lệ vẫn tăng đều. Bộ đếm vi phạm cộng dồn theo thời gian và chỉ được xoá bằng `dtc clear`.
 
 ### 6. Khung trùng lặp Rolling Counter (`can inject replay`)
 
-![replay](docs/images/demo-06-replay.jpg)
+![replay](img/hinh6.jpg)
 
 Tương tự mục 5 nhưng với lỗi trùng Counter: log ghi `Duplicate Frame ID 0x123 ... Replay Attack`, `can stat` tăng mục `Frame bi trung lap` (còn `Frame sai ma CRC-8` giữ nguyên 0). Hai loại vi phạm dùng chung một ngưỡng 3 nên lần thứ 3 cũng kích hoạt `DTC_U0401`.
 
