@@ -126,9 +126,6 @@ flowchart LR
     N1["NODE 1<br/>STM32F746G-Discovery<br/>PB9 TX · PB8 RX · PI0 STB"] --> T1["Transceiver 1<br/>SN65HVD230"]
     T1 <==>|"CAN_H / CAN_L<br/>xoắn đôi + GND chung"| T2["Transceiver 2<br/>SN65HVD230"]
     T2 --> N2["NODE 2<br/>STM32F103 Blue Pill<br/>PA12 TX · PA11 RX"]
-
-    R1["120Ω"] -.- T1
-    T2 -.- R2["120Ω"]
 ```
 
 | Tín hiệu | Node 1 (F746) | Node 2 (F103) | Cả 2 Transceiver (SN65HVD230) |
